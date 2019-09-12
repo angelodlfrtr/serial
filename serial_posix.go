@@ -14,7 +14,7 @@ import (
 	"os"
 	"syscall"
 	"time"
-	//"unsafe"
+	"unsafe"
 )
 
 func openPort(name string, baud int, databits byte, parity Parity, stopbits StopBits, readTimeout time.Duration) (p *Port, err error) {
@@ -35,7 +35,10 @@ func openPort(name string, baud int, databits byte, parity Parity, stopbits Stop
 		f.Close()
 		return nil, err
 	}
+
 	var speed C.speed_t
+	standardBaud := true
+
 	switch baud {
 	case 115200:
 		speed = C.B115200
@@ -70,8 +73,12 @@ func openPort(name string, baud int, databits byte, parity Parity, stopbits Stop
 	case 50:
 		speed = C.B50
 	default:
-		f.Close()
-		return nil, fmt.Errorf("Unknown baud rate %v", baud)
+		// Set a default speed, we will change it later
+		speed = C.B38400
+		standardBaud = false
+
+		//f.Close()
+		//return nil, fmt.Errorf("Unknown baud rate %v", baud)
 	}
 
 	_, err = C.cfsetispeed(&st, speed)
@@ -167,6 +174,24 @@ func openPort(name string, baud int, databits byte, parity Parity, stopbits Stop
 		                        return nil, os.NewError(s)
 				}
 	*/
+
+	// Set baud rate with the IOSSIOSPEED ioctl, to support non-standard speeds.
+	if standardBaud == false {
+		r2, _, errno2 := syscall.Syscall(
+			syscall.SYS_IOCTL,
+			uintptr(f.Fd()),
+			uintptr(0x80045402),
+			uintptr(unsafe.Pointer(&baud)),
+		)
+
+		if errno2 != 0 {
+			return nil, os.NewSyscallError("SYS_IOCTL", errno2)
+		}
+
+		if r2 != 0 {
+			return nil, errors.New("Unknown error from SYS_IOCTL.")
+		}
+	}
 
 	return &Port{f: f}, nil
 }
